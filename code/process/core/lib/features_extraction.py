@@ -259,7 +259,8 @@ def extract_feat_original(sig, fs, filtered=True, remove_start_end=True):
     ppg = PPG(sig,fs)
     _, head, feat_str = ppg.features_extractor(filtered=filtered, remove_first=remove_start_end)
     
-    feat = [float(s) for s in feat_str.split(', ')]
+    feat = [float(re.search(r'\(([^)]+)\)', s).group(1)) for s in feat_str.split(', ')]
+    #feat = [float(s) for s in feat_str.split(', ')]
     
     return head, feat
 
