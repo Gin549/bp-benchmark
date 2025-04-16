@@ -11,6 +11,22 @@ from tqdm import tqdm
 
 from core.lib.preprocessing import align_pair
 
+
+def jitter(signal, sigma=0.01):
+    noise = np.random.normal(loc=0, scale=sigma, size=signal.shape)
+    return signal + noise
+
+def scaling(signal, sigma=0.1):
+    factor = np.random.normal(loc=1.0, scale=sigma)
+    return signal * factor
+
+def add_white_noise(signal, snr_db=20):
+    signal_power = np.mean(signal ** 2)
+    snr = 10 ** (snr_db / 10)
+    noise_power = signal_power / snr
+    noise = np.random.normal(0, np.sqrt(noise_power), size=signal.shape)
+    return signal + noise
+
 def main(args):
 
     ## Create the dirs for the ouput data if do not exist
@@ -70,15 +86,34 @@ def main(args):
     
     print('Aligning and segmenting with win_size: {}...'.format(win_size)) 
     
+    augmented_rows = []  # To store new augmented rows
+
     for i in tqdm(range(df.shape[0])):
         abp = df.iloc[i].abp_signal
         ppg = df.iloc[i].signal
         a_abp, a_rppg, shift = align_pair(abp, ppg, int(len(abp)/fs), fs)
-        
-        init_idx = (len(a_abp) - win_size)//2
-        
-        df['signal'].iloc[i] = a_rppg[init_idx: init_idx+win_size]
-        df['abp_signal'].iloc[i] = a_abp[init_idx: init_idx+win_size]
+
+        init_idx = (len(a_abp) - win_size) // 2
+
+        # Original aligned + cropped signals
+        base_rppg = a_rppg[init_idx: init_idx+win_size]
+        base_abp = a_abp[init_idx: init_idx+win_size]
+
+        # Overwrite original sample
+        df.at[i, 'signal'] = base_rppg
+        df.at[i, 'abp_signal'] = base_abp
+
+        # Add 3 augmented versions of PPG (ABP unchanged)
+        for aug_func in [jitter, scaling, add_white_noise]:
+            aug_ppg = aug_func(base_rppg)
+            new_row = df.iloc[i].copy()
+            new_row['signal'] = aug_ppg
+            new_row['abp_signal'] = base_abp
+            augmented_rows.append(new_row)
+
+    # Add augmented rows after the loop
+    if len(augmented_rows) > 0:
+        df = pd.concat([df, pd.DataFrame(augmented_rows)], ignore_index=True)
         
     print('Removing duplicates...')
     num_prev = df.shape[0]
