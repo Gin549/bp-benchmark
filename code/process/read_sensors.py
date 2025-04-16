@@ -85,25 +85,37 @@ def main(args):
     print('Parameters -- win_size: {}, fs: {}'.format(win_size,fs))
     
     print('Aligning and segmenting with win_size: {}...'.format(win_size)) 
-    
-    augmented_rows = []  # To store new augmented rows
+    print("Deduplicating original data before augmentation...")
+    df['ppg_str'] = df.signal.map(lambda p: p.tobytes())
+    df['abp_str'] = df.abp_signal.map(lambda p: p.tobytes())
+    df = df.drop_duplicates(subset=['ppg_str', 'abp_str'], keep='first').reset_index(drop=True)
+    df.drop(columns=['ppg_str', 'abp_str'], inplace=True)
+    print(f"Original samples remaining after deduplication: {df.shape[0]}")
 
+    # Prepare for augmentation
+    aligned_rows = []
+    augmented_rows = []
+
+    print('Aligning, cropping, and augmenting...')
     for i in tqdm(range(df.shape[0])):
         abp = df.iloc[i].abp_signal
         ppg = df.iloc[i].signal
-        a_abp, a_rppg, shift = align_pair(abp, ppg, int(len(abp)/fs), fs)
 
+        # Align
+        a_abp, a_rppg, shift = align_pair(abp, ppg, int(len(abp)/fs), fs)
         init_idx = (len(a_abp) - win_size) // 2
 
-        # Original aligned + cropped signals
+        # Crop
         base_rppg = a_rppg[init_idx: init_idx+win_size]
         base_abp = a_abp[init_idx: init_idx+win_size]
 
-        # Overwrite original sample
-        df.at[i, 'signal'] = base_rppg
-        df.at[i, 'abp_signal'] = base_abp
+        # Aligned & cropped original
+        original_row = df.iloc[i].copy()
+        original_row['signal'] = base_rppg
+        original_row['abp_signal'] = base_abp
+        aligned_rows.append(original_row)
 
-        # Add 3 augmented versions of PPG (ABP unchanged)
+        # Augmented versions (only PPG changes)
         for aug_func in [jitter, scaling, add_white_noise]:
             aug_ppg = aug_func(base_rppg)
             new_row = df.iloc[i].copy()
@@ -111,23 +123,20 @@ def main(args):
             new_row['abp_signal'] = base_abp
             augmented_rows.append(new_row)
 
-    # Add augmented rows after the loop
-    if len(augmented_rows) > 0:
-        df = pd.concat([df, pd.DataFrame(augmented_rows)], ignore_index=True)
-        
-    print('Removing duplicates...')
-    num_prev = df.shape[0]
-    df['ppg_str'] = df.signal.map(lambda p: p.tobytes())
-    df['abp_str'] = df.abp_signal.map(lambda p: p.tobytes())
-    df = df.drop_duplicates(subset='ppg_str', keep='first').reset_index(drop=True)
-    df = df.drop_duplicates(subset='abp_str', keep='first').reset_index(drop=True)
-    df.drop(columns=['ppg_str','abp_str'], inplace=True)
-    
-    print('Removed duplicates: {}'.format(num_prev-df.shape[0]))
-    
-    print('Saving data...')
-    df.to_pickle(args.save_name)
+    # Combine aligned original + augmented data
+    df_final = pd.DataFrame(aligned_rows + augmented_rows)
 
+    # Optional: final deduplication by PPG only
+    print('Final deduplication on PPG only...')
+    num_prev = df_final.shape[0]
+    df_final['ppg_str'] = df_final.signal.map(lambda p: p.tobytes())
+    df_final = df_final.drop_duplicates(subset='ppg_str', keep='first').reset_index(drop=True)
+    df_final.drop(columns=['ppg_str'], inplace=True)
+    print(f"Removed duplicates after augmentation: {num_prev - df_final.shape[0]}")
+
+    # Save
+    print('Saving data...')
+    df_final.to_pickle(args.save_name)
 
 
 if __name__=="__main__":
