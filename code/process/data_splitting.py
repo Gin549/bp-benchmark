@@ -74,6 +74,10 @@ def data_splitting(config):
 
     joblib.dump(all_split_df, config.path.split_df_path)
 
+    base_csv_path = config.path.split_df_path.replace('.pkl', '')
+    for idx, df in enumerate(all_split_df):
+        df.to_csv(f"{base_csv_path}_split{idx}.csv", index=False)
+
 def main(config):
     np.random.seed(config.param_split.random_state)
     random.seed(config.param_split.random_state)
